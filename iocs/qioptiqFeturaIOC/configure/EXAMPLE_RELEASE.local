@@ -1,0 +1,6 @@
+# Use the following lines if motorQioptiqFetura was built inside motor
+MOTOR=
+-include $(MOTOR)/configure/RELEASE
+# Use the following lines if motorQioptiqFetura was built outside motor
+#!MOTOR_QIOPTIQFETURA=
+#!-include $(MOTOR_QIOPTIQFETURA)/configure/RELEASE.local

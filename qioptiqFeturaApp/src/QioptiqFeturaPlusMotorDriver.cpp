@@ -1,8 +1,8 @@
 /*
-FILENAME...   FeturaPlus.cpp
-USAGE...      Asyn Motor driver support for the Qioptiq Fetura+ optics
+FILENAME...   QioptiqFeturaPlusMotorDriver.cpp
+USAGE...      Motor driver support (model 3, asyn) for the Qioptiq Fetura+ optics
 
-Jose Gabadinho
+Jose G.C. Gabadinho
 October 2020
 */
 
@@ -21,7 +21,7 @@ October 2020
 
 #include <epicsExport.h>
 
-#include "QiopticFeturaPlusMotorDriver.h"
+#include "QioptiqFeturaPlusMotorDriver.h"
 
 
 
@@ -55,7 +55,7 @@ FeturaPlusController::FeturaPlusController(const char *portName, const char *asy
     asynPrint(this->pasynUserSelf, ASYN_TRACE_FLOW, "%s:%s: Creating Fetura+ controller %s to asyn %s with %d axes\n", driverName, functionName, portName, asynPortName, numAxes);
     status = pasynOctetSyncIO->connect(asynPortName, 0, &pasynUserController_, NULL);
     if (status) {
-        asynPrint(this->pasynUserSelf, ASYN_TRACE_ERROR, "%s:%s: cannot connect to fetura+ controller\n", driverName, functionName);
+        asynPrint(this->pasynUserSelf, ASYN_TRACE_ERROR, "%s:%s: cannot connect to fetura+ %s controller\n", driverName, functionName, portName);
     } else {
         pasynOctetSyncIO->setInputEos(pasynUserController_, "", 0);
         pasynOctetSyncIO->setOutputEos(pasynUserController_, "", 0);
@@ -65,10 +65,10 @@ FeturaPlusController::FeturaPlusController(const char *portName, const char *asy
         if (nread == sizeof(SYNC_REPLY)) {
             if (!memcmp(this->inString_, SYNC_REPLY, sizeof(SYNC_REPLY))) {
             } else {
-                asynPrint(this->pasynUserSelf, ASYN_TRACE_ERROR, "%s:%s: unable to synchronize with fetura+ controller\n", driverName, functionName);
+                asynPrint(this->pasynUserSelf, ASYN_TRACE_ERROR, "%s:%s: unable to synchronize with fetura+ %s controller\n", driverName, functionName, portName);
             }
         } else {
-            asynPrint(this->pasynUserSelf, ASYN_TRACE_ERROR, "%s:%s: unable to synchronize with fetura+ controller\n", driverName, functionName);
+            asynPrint(this->pasynUserSelf, ASYN_TRACE_ERROR, "%s:%s: unable to synchronize with fetura+ %s controller\n", driverName, functionName, portName);
         }
     }
 
@@ -105,13 +105,13 @@ void FeturaPlusController::report(FILE *fp, int level) {
                                (unsigned char)(this->inString_[sizeof(SERIALNUMBER_REPLY_PREFIX)+2] << 8) + 
                                (unsigned char)(this->inString_[sizeof(SERIALNUMBER_REPLY_PREFIX)+3]);
                 } else {
-                    asynPrint(this->pasynUserSelf, ASYN_TRACE_ERROR, "Wrong checksum while getting fetura+ serial number\n");
+                    asynPrint(this->pasynUserSelf, ASYN_TRACE_ERROR, "Wrong checksum while getting fetura+ %s serial number\n", this->portName);
                 }
             } else {
-                asynPrint(this->pasynUserSelf, ASYN_TRACE_ERROR, "Wrong answer while getting fetura+ serial number\n");
+                asynPrint(this->pasynUserSelf, ASYN_TRACE_ERROR, "Wrong answer while getting fetura+ %s serial number\n", this->portName);
             }
         } else {
-            asynPrint(this->pasynUserSelf, ASYN_TRACE_ERROR, "Wrong answer while getting fetura+ serial number (read %zu bytes)\n", nread);
+            asynPrint(this->pasynUserSelf, ASYN_TRACE_ERROR, "Wrong answer while getting fetura+ %s serial number (read %zu bytes)\n", this->portName, nread);
         }
         if (serialnr) {
             fprintf(fp, "  serial number=%X\n", serialnr);
@@ -130,13 +130,13 @@ void FeturaPlusController::report(FILE *fp, int level) {
                     firmlo = (unsigned char)(this->inString_[sizeof(FIRMWARE_REPLY_PREFIX)] << 8) + 
                              (unsigned char)(this->inString_[sizeof(FIRMWARE_REPLY_PREFIX)+1]);
                 } else {
-                    asynPrint(this->pasynUserSelf, ASYN_TRACE_ERROR, "Wrong checksum while getting fetura+ firmware version\n");
+                    asynPrint(this->pasynUserSelf, ASYN_TRACE_ERROR, "Wrong checksum while getting fetura+ %s firmware version\n", this->portName);
                 }
             } else {
-                asynPrint(this->pasynUserSelf, ASYN_TRACE_ERROR, "Wrong answer while getting fetura+ firmware version\n");
+                asynPrint(this->pasynUserSelf, ASYN_TRACE_ERROR, "Wrong answer while getting fetura+ %s firmware version\n", this->portName);
             }
         } else {
-            asynPrint(this->pasynUserSelf, ASYN_TRACE_ERROR, "Wrong answer while getting fetura+ firmware version (read %zu bytes)\n", nread);
+            asynPrint(this->pasynUserSelf, ASYN_TRACE_ERROR, "Wrong answer while getting fetura+ %s firmware version (read %zu bytes)\n", this->portName, nread);
         }
         if ((firmhi) || (firmlo)) {
             fprintf(fp, "  firmware version=%d.%d\n", firmhi, firmlo);
@@ -253,9 +253,13 @@ asynStatus FeturaPlusAxis::move(double position, int relative, double minVelocit
 
     // First check if ready
     is_busy = getBusyState();
-
     if (is_busy == 0) {
         setIntegerParam(pC_->motorStatusDone_, 0);
+
+        asynPrint(pC_->pasynUserSelf, ASYN_TRACE_FLOW, "Moving fetura+ %s to %f (at %f)\n", pC_->portName, position, maxVelocity);
+        if (maxVelocity > MOVEMODE_THRESHOLD) {
+            position += MOVEMODE_THRESHOLD;
+        }
 
         memcpy(pC_->outString_, MOVETO_CMD_PREFIX, sizeof(MOVETO_CMD_PREFIX));
         pC_->outString_[sizeof(MOVETO_CMD_PREFIX)] = (moveto_pos & 0xFF00)>>8;
@@ -271,22 +275,23 @@ asynStatus FeturaPlusAxis::move(double position, int relative, double minVelocit
                     if (checkChecksumAtEnd(pC_->inString_, nread)) {
                         errors = 1-pC_->inString_[sizeof(READBACK_REPLY_PREFIX)+1];
                     } else {
-                        asynPrint(pC_->pasynUserSelf, ASYN_TRACE_ERROR, "Wrong checksum while moving fetura+\n");
+                        asynPrint(pC_->pasynUserSelf, ASYN_TRACE_ERROR, "Wrong checksum while moving fetura+ %s\n", pC_->portName);
                         errors++;
                     }
                 }
             } else {
                 if (!memcmp(pC_->inString_, ACKNOWLEDGE, sizeof(ACKNOWLEDGE))) {
                 } else {
-                    asynPrint(pC_->pasynUserSelf, ASYN_TRACE_ERROR, "Unrecognized reply while moving fetura+\n");
+                    asynPrint(pC_->pasynUserSelf, ASYN_TRACE_ERROR, "Unrecognized reply while moving fetura+ %s\n", pC_->portName);
                     errors++;
                 }
             }
         } else {
-            asynPrint(pC_->pasynUserSelf, ASYN_TRACE_ERROR, "Unrecognized reply while moving fetura+\n");
+            asynPrint(pC_->pasynUserSelf, ASYN_TRACE_ERROR, "Unrecognized reply while moving fetura+ %s\n", pC_->portName);
             errors++;
         }
     } else {
+        asynPrint(pC_->pasynUserSelf, ASYN_TRACE_FLOW, "Cannot move fetura+ %s because device is busy\n", pC_->portName);
         errors++;
     }
 
@@ -314,10 +319,11 @@ asynStatus FeturaPlusAxis::home(double minVelocity, double maxVelocity, double a
 
     // First check if ready
     is_busy = getBusyState();
-
     if (is_busy == 0) {
         setIntegerParam(pC_->motorStatusDone_, 0);
         setDoubleParam(pC_->motorPosition_, 0);
+
+        asynPrint(pC_->pasynUserSelf, ASYN_TRACE_FLOW, "Homing fetura+ %s...\n", pC_->portName);
 
         // Reset controller
         memcpy(pC_->outString_, RESET_CMD, sizeof(RESET_CMD));
@@ -328,14 +334,15 @@ asynStatus FeturaPlusAxis::home(double minVelocity, double maxVelocity, double a
                 epicsThreadSleep(0.501);
                 pasynOctetSyncIO->flush(pC_->pasynUserController_);
             } else {
-                asynPrint(pC_->pasynUserSelf, ASYN_TRACE_ERROR, "Unrecognized reply while homing fetura+\n");
+                asynPrint(pC_->pasynUserSelf, ASYN_TRACE_ERROR, "Unrecognized reply while homing fetura+ %s\n", pC_->portName);
                 errors++;
             }
         } else {
-            asynPrint(pC_->pasynUserSelf, ASYN_TRACE_ERROR, "Wrong answer while homing fetura+ (read %zu bytes)\n", nread);
+            asynPrint(pC_->pasynUserSelf, ASYN_TRACE_ERROR, "Wrong answer while homing fetura+ %s (read %zu bytes)\n", pC_->portName, nread);
             errors++;
         }
     } else {
+        asynPrint(pC_->pasynUserSelf, ASYN_TRACE_FLOW, "Cannot home fetura+ %s because device is busy\n", pC_->portName);
         errors++;
     }
 
@@ -420,16 +427,16 @@ int FeturaPlusAxis::getHomedState() {
                 if (checkChecksumAtEnd(pC_->inString_, nread)) {
                     home_done = pC_->inString_[sizeof(CHECKHOME_REPLY_PREFIX)+1];
                 } else {
-                    asynPrint(pC_->pasynUserSelf, ASYN_TRACE_ERROR, "Wrong checksum while retrieving fetura+ homing status\n");
+                    asynPrint(pC_->pasynUserSelf, ASYN_TRACE_ERROR, "Wrong checksum while retrieving fetura+ %s homing status\n", pC_->portName);
                 }
             } else {
-                asynPrint(pC_->pasynUserSelf, ASYN_TRACE_ERROR, "Wrong answer while retrieving fetura+ homing status\n");
+                asynPrint(pC_->pasynUserSelf, ASYN_TRACE_ERROR, "Wrong answer while retrieving fetura+ %s homing status\n", pC_->portName);
             }
         } else {
-            asynPrint(pC_->pasynUserSelf, ASYN_TRACE_ERROR, "Wrong answer while retrieving fetura+ homing status\n");
+            asynPrint(pC_->pasynUserSelf, ASYN_TRACE_ERROR, "Wrong answer while retrieving fetura+ %s homing status\n", pC_->portName);
         }
     } else {
-        asynPrint(pC_->pasynUserSelf, ASYN_TRACE_ERROR, "Wrong answer while retrieving fetura+ homing status (read %zu bytes)\n", nread);
+        asynPrint(pC_->pasynUserSelf, ASYN_TRACE_ERROR, "Wrong answer while retrieving fetura+ %s homing status (read %zu bytes)\n", pC_->portName, nread);
     }
 
     return home_done;
@@ -453,16 +460,16 @@ int FeturaPlusAxis::getBusyState() {
                 if (checkChecksumAtEnd(pC_->inString_, nread)) {
                     is_busy = pC_->inString_[sizeof(STATUS_REPLY_PREFIX)+1];
                 } else {
-                    asynPrint(pC_->pasynUserSelf, ASYN_TRACE_ERROR, "Wrong checksum while retrieving fetura+ status\n");
+                    asynPrint(pC_->pasynUserSelf, ASYN_TRACE_ERROR, "Wrong checksum while retrieving fetura+ %s status\n", pC_->portName);
                 }
             } else {
-                asynPrint(pC_->pasynUserSelf, ASYN_TRACE_ERROR, "Unrecognized reply while retrieving fetura+ status\n");
+                asynPrint(pC_->pasynUserSelf, ASYN_TRACE_ERROR, "Unrecognized reply while retrieving fetura+ %s status\n", pC_->portName);
             }
         } else {
-            asynPrint(pC_->pasynUserSelf, ASYN_TRACE_ERROR, "Unrecognized reply while retrieving fetura+ status\n");
+            asynPrint(pC_->pasynUserSelf, ASYN_TRACE_ERROR, "Unrecognized reply while retrieving fetura+ %s status\n", pC_->portName);
         }
     } else {
-        asynPrint(pC_->pasynUserSelf, ASYN_TRACE_ERROR, "Wrong answer while retrieving fetura+ status (read %zu bytes)\n", nread);
+        asynPrint(pC_->pasynUserSelf, ASYN_TRACE_ERROR, "Wrong answer while retrieving fetura+ %s status (read %zu bytes)\n", pC_->portName, nread);
     }
 
     return is_busy;
@@ -485,13 +492,13 @@ int FeturaPlusAxis::getCurrentPosition() {
                 readback = pC_->inString_[sizeof(READBACK_REPLY_PREFIX)] << 8;
                 readback += (unsigned char)(pC_->inString_[sizeof(READBACK_REPLY_PREFIX)+1]);
             } else {
-                asynPrint(pC_->pasynUserSelf, ASYN_TRACE_ERROR, "Wrong checksum while retrieving fetura+ readback\n");
+                asynPrint(pC_->pasynUserSelf, ASYN_TRACE_ERROR, "Wrong checksum while retrieving fetura+ %s readback\n", pC_->portName);
             }
         } else {
-            asynPrint(pC_->pasynUserSelf, ASYN_TRACE_ERROR, "Unrecognized reply while retrieving fetura+ readback\n");
+            asynPrint(pC_->pasynUserSelf, ASYN_TRACE_ERROR, "Unrecognized reply while retrieving fetura+ %s readback\n", pC_->portName);
         }
     } else {
-        asynPrint(pC_->pasynUserSelf, ASYN_TRACE_ERROR, "Wrong answer while retrieving fetura+ readback (read %zu bytes)\n", nread);
+        asynPrint(pC_->pasynUserSelf, ASYN_TRACE_ERROR, "Wrong answer while retrieving fetura+ %s readback (read %zu bytes)\n", pC_->portName, nread);
     }
 
     return readback;
@@ -547,10 +554,10 @@ static void FeturaPlusCreateControllerCallFunc(const iocshArgBuf *args) {
     FeturaPlusCreateController(args[0].sval, args[1].sval, args[2].ival, args[3].ival, args[4].ival);
 }
 
-static void QiopticFeturaPlusRegister(void) {
+static void QioptiqFeturaPlusRegister(void) {
     iocshRegister(&FeturaPlusCreateControllerDef, FeturaPlusCreateControllerCallFunc);
 }
 
 extern "C" {
-    epicsExportRegistrar(QiopticFeturaPlusRegister);
+    epicsExportRegistrar(QioptiqFeturaPlusRegister);
 }

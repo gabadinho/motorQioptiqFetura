@@ -5,6 +5,9 @@ include $(TOP)/configure/CONFIG
 #  ADD MACRO DEFINITIONS AFTER THIS LINE
 #=============================
 
+# The following are used for debugging messages.
+#!USR_CXXFLAGS += -DDEBUG
+
 #=============================
 # Build the IOC application
 
@@ -16,10 +19,23 @@ DBD += qioptiqFetura.dbd
 qioptiqFetura_DBD += base.dbd
 
 # Include dbd files from all support applications:
-#qioptiqFetura_DBD += xxx.dbd
+#ifdef ASYN
+qioptiqFetura_DBD += asyn.dbd
+qioptiqFetura_DBD += drvAsynSerialPort.dbd
+qioptiqFetura_DBD += drvAsynIPPort.dbd
+#endif
+qioptiqFetura_DBD += motorSupport.dbd
+qioptiqFetura_DBD += qioptiqFeturaPlusMotor.dbd
 
 # Add all the support libraries needed by this IOC
-#qioptiqFetura_LIBS += xxx
+qioptiqFetura_LIBS += qioptiqFeturaMotor
+qioptiqFetura_LIBS += motor
+#ifdef ASYN
+qioptiqFetura_LIBS += asyn
+#endif
+#ifdef SNCSEQ
+qioptiqFetura_LIBS += seq pv
+#endif
 
 # qioptiqFetura_registerRecordDeviceDriver.cpp derives from qioptiqFetura.dbd
 qioptiqFetura_SRCS += qioptiqFetura_registerRecordDeviceDriver.cpp

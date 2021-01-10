@@ -10,10 +10,8 @@ include $(TOP)/configure/CONFIG
 
 LIBRARY_IOC += qioptiqFeturaMotor
 
-# xxxRecord.h will be created from xxxRecord.dbd
-#DBDINC += xxxRecord
 # install qioptiqFeturaMotor.dbd into <top>/dbd
-DBD += qioptiqFeturaMotor.dbd
+DBD += qioptiqFeturaPlusMotor.dbd
 
 INC += QioptiqFeturaPlusMotorDriver.h
 

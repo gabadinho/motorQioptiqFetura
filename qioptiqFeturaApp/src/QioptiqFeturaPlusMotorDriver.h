@@ -1,10 +1,13 @@
 /*
 FILENAME...   QioptiqFeturaPlusMotorDriver.h
-USAGE...      Asyn Motor driver support for the Qioptiq Fetura+ optics
+USAGE...      Motor driver support (model 3, asyn) for the Qioptiq Fetura+ optics
 
-Jose Gabadinho
+Jose G.C. Gabadinho
 October 2020
 */
+
+#ifndef _QIOPTIQFETURAPLUSMOTORDRIVER_H_
+#define _QIOPTIQFETURAPLUSMOTORDRIVER_H_
 
 #include <stddef.h>
 
@@ -37,6 +40,8 @@ const unsigned char FIRMWARE_REPLY_PREFIX[] = { 0x4F, 0x0C, 0x00, 0x11, 0xB4, 0x
 
 const unsigned char SYNC_CMD[]   = { 0xFF };
 const unsigned char SYNC_REPLY[] = { 0x0D };
+
+const unsigned MOVEMODE_THRESHOLD = 1000;
 
 
 
@@ -94,3 +99,5 @@ private:
 
 friend class FeturaPlusAxis;
 };
+
+#endif // _QIOPTIQFETURAPLUSMOTORDRIVER_H_

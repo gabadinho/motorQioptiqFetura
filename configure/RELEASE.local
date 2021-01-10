@@ -1,0 +1,5 @@
+MOTOR=/home/gabadinho/SWDev/EPICS/modules/synApps_6_1/support/motor-R7-1
+-include $(MOTOR)/configure/RELEASE
+# path to motorQioptiqFetura is needed to build the IOC inside motorQioptiqFetura, but outside motor
+MOTOR_QIOPTIQFETURA=/home/gabadinho/SWDev/EPICS/motorQioptiqFetura
+

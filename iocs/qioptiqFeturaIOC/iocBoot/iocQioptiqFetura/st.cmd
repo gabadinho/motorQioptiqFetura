@@ -1,18 +1,24 @@
 #!../../bin/linux-x86_64/qioptiqFetura
 
-#- You may have to change qioptiqFetura to something else
-#- everywhere it appears in this file
+< envPaths
 
-#< envPaths
+cd "${TOP}"
 
 ## Register all support components
-dbLoadDatabase("../../dbd/qioptiqFetura.dbd",0,0)
+dbLoadDatabase "dbd/qioptiqFetura.dbd"
 qioptiqFetura_registerRecordDeviceDriver(pdbbase) 
 
-## Load record instances
-dbLoadRecords("../../db/qioptiqFetura.db","user=gabadinho")
+cd "${TOP}/iocBoot/${IOC}"
 
-iocInit()
+## motorUtil (allstop & alldone)
+dbLoadRecords("$(MOTOR)/db/motorUtil.db", "P=FETURAPLUS:")
 
-## Start any sequence programs
-#seq sncqioptiqFetura,"user=gabadinho"
+##
+< feturaplus.cmd
+
+iocInit
+
+## motorUtil (allstop & alldone)
+motorUtilInit("FETURAPLUS:")
+
+# Boot complete
