@@ -38,10 +38,10 @@ static const char *driverName = "FeturaPlusOptics";
   * \param[in] idlePollPeriod    The time between polls when no axis is moving 
   */
 FeturaPlusController::FeturaPlusController(const char *portName, const char *asynPortName, int numAxes, double movingPollPeriod, double idlePollPeriod)
-    :asynMotorController(portName, 1, NUM_FETURA_PARAMS, 
+    :asynMotorController(portName, 1, NUM_FETURA_PARAMS,
                          asynUInt32DigitalMask,
                          asynUInt32DigitalMask,
-                         ASYN_CANBLOCK | ASYN_MULTIDEVICE, 
+                         ASYN_CANBLOCK,
                          1, /* autoconnect */
                          0, 0) /* Default priority and stack size */ {
     int axis;
