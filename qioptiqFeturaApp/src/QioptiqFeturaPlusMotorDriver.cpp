@@ -39,8 +39,8 @@ static const char *driverName = "FeturaPlusOptics";
   */
 FeturaPlusController::FeturaPlusController(const char *portName, const char *asynPortName, int numAxes, double movingPollPeriod, double idlePollPeriod)
     :asynMotorController(portName, 1, NUM_FETURA_PARAMS,
-                         asynUInt32DigitalMask,
-                         asynUInt32DigitalMask,
+                         0,
+                         0,
                          ASYN_CANBLOCK,
                          1, /* autoconnect */
                          0, 0) /* Default priority and stack size */ {
