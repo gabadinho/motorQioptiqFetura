@@ -256,9 +256,12 @@ asynStatus FeturaPlusAxis::move(double position, int relative, double minVelocit
     if (is_busy == 0) {
         setIntegerParam(pC_->motorStatusDone_, 0);
 
-        asynPrint(pC_->pasynUserSelf, ASYN_TRACE_FLOW, "Moving fetura+ %s to %f (at %f)\n", pC_->portName, position, maxVelocity);
+        // Select move mode depending on velocity: fast-zoom mode, or continuous-zoom mode when VELO>1000
         if (maxVelocity > MOVEMODE_THRESHOLD) {
+            asynPrint(pC_->pasynUserSelf, ASYN_TRACE_FLOW, "Moving fetura+ %s to %f in CZM\n", pC_->portName, position);
             position += MOVEMODE_THRESHOLD;
+        } else {
+            asynPrint(pC_->pasynUserSelf, ASYN_TRACE_FLOW, "Moving fetura+ %s to %f in FZM\n", pC_->portName, position);
         }
 
         memcpy(pC_->outString_, MOVETO_CMD_PREFIX, sizeof(MOVETO_CMD_PREFIX));
