@@ -2,5 +2,5 @@ file "$(MOTOR)/db/basic_asyn_motor.db"
 {
 pattern
 {P,            M,        DTYP,         PORT,      ADDR,  DESC,            EGU,  DIR,  VELO,  VBAS,  ACCL,  BDST,  BVEL,  BACC,  MRES,    PREC,  DHLM,  DLLM,  INIT}
-{FETURAPLUS:,  "ZOOM",   "asynMotor",  QFETPLUS,  0,     "Fetura+ Zoom",  mm,   Pos,  .0,    .0,    .0,    0,     1,     .2,    1,       0,     1000,  1,     ""  }
+{FETURAPLUS:,  "ZOOM",   "asynMotor",  QFETPLUS,  0,     "Fetura+ Zoom",  mm,   Pos,  1,     1,     0,     0,     1,     .2,    1,       0,     1000,  1,     ""  }
 }
