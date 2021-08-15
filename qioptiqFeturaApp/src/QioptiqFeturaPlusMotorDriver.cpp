@@ -81,8 +81,7 @@ FeturaPlusController::FeturaPlusController(const char *portName, const char *asy
 }
 
 /** Reports on status of the driver.
-  * If details > 0 then information is printed about each axis.
-  * After printing controller-specific information calls asynMotorController::report()
+  * If level > 0 then serial number, firmware version, axes information is printed.
   *
   * \param[in] fp The file pointer on which report information will be written
   * \param[in] level The level of report detail desired
@@ -152,7 +151,7 @@ void FeturaPlusController::report(FILE *fp, int level) {
 
 /** Returns a pointer to an FeturaPlusAxis object.
   *
-  * \param[in] pasynUser asynUser structure that encodes the axis index number.
+  * \param[in] pasynUser asynUser structure that encodes the axis index number
   *
   * \return FeturaPlusAxis object or NULL if the axis number encoded in pasynUser is invalid
   */
@@ -162,7 +161,7 @@ FeturaPlusAxis* FeturaPlusController::getAxis(asynUser *pasynUser) {
 
 /** Returns a pointer to an FeturaPlusAxis object.
   *
-  * \param[in] axisNo Axis index number.
+  * \param[in] axisNo Axis index number
   *
   * \return FeturaPlusAxis object or NULL if the axis number encoded in pasynUser is invalid
   */
@@ -209,8 +208,7 @@ FeturaPlusAxis::FeturaPlusAxis(FeturaPlusController *pC, int axisNo): asynMotorA
 }
 
 /** Reports on status of the driver.
-  * If details > 0 then information is printed about each axis.
-  * After printing controller-specific information calls asynMotorAxis::report()
+  * If level > 0 then homing information is printed.
   *
   * \param[in] fp The file pointer on which report information will be written
   * \param[in] level The level of report detail desired
@@ -358,13 +356,10 @@ asynStatus FeturaPlusAxis::home(double minVelocity, double maxVelocity, double a
 }
 
 /** Polls the axis.
-  * This function reads the controller position, encoder position, the limit status, the moving status, 
-  * and the drive power-on status.  It does not current detect following error, etc. but this could be
-  * added.
-  * It calls setIntegerParam() and setDoubleParam() for each item that it polls,
-  * and then calls callParamCallbacks() at the end.
+  * Reads the busy state and readback position and calls setIntegerParam() or setDoubleParam() for each item that it polls.
   *
-  * \param[out] moving A flag that is set indicating that the axis is moving (1) or done (0). */
+  * \param[out] moving A flag that is set indicating that the axis is moving (1) or done (0)
+  */
 asynStatus FeturaPlusAxis::poll(bool *moving) { 
     asynStatus status = asynError;
     int status_done, errors=0, readback, is_busy;
