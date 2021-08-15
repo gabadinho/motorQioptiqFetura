@@ -33,7 +33,7 @@ static const char *driverName = "FeturaPlusOptics";
   *
   * \param[in] portName          The name of the asyn port that will be created for this driver
   * \param[in] asynPortName      The name of the drvAsynIPPPort that was created previously to connect to the Fetura+ controller 
-  * \param[in] numAxes           The number of axes that this controller supports 
+  * \param[in] numAxes           The number of axes that this controller supports (discarded and overwritten to 1)
   * \param[in] movingPollPeriod  The time between polls when any axis is moving 
   * \param[in] idlePollPeriod    The time between polls when no axis is moving 
   */
