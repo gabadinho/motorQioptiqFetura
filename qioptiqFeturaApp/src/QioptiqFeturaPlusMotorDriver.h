@@ -95,8 +95,6 @@ protected:
 
 #define NUM_FETURA_PARAMS 0
 
-private:
-
 friend class FeturaPlusAxis;
 };
 

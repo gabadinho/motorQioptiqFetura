@@ -207,7 +207,7 @@ FeturaPlusAxis::FeturaPlusAxis(FeturaPlusController *pC, int axisNo): asynMotorA
     callParamCallbacks();
 }
 
-/** Reports on status of the driver.
+/** Reports on status of the axis.
   * If level > 0 then homing information is printed.
   *
   * \param[in] fp The file pointer on which report information will be written
@@ -221,13 +221,26 @@ void FeturaPlusAxis::report(FILE *fp, int level) {
         if (home_done!=-1) {
             this->setIntegerParam(pC_->motorStatusHomed_, home_done);
             if (home_done) {
-                fprintf(fp, "  Homing done\n");
+                fprintf(fp,
+                    "  axis %d\n"
+                    "  homing = done\n",
+                    this->axisNo_);
             } else {
-                fprintf(fp, "  Homing in progress\n");
+                fprintf(fp,
+                    "  axis %d\n"
+                    "  homing = in progress\n",
+                    this->axisNo_);
             } 
         } else {
-            fprintf(fp, "  Homing unknown\n");
+            fprintf(fp,
+                "  axis %d\n"
+                "  homing = unknown\n",
+                this->axisNo_);
         }
+    } else {
+        fprintf(fp,
+            "  axis %d\n",
+            this->axisNo_);
     }
 
     asynMotorAxis::report(fp, level);
@@ -359,6 +372,8 @@ asynStatus FeturaPlusAxis::home(double minVelocity, double maxVelocity, double a
   * Reads the busy state and readback position and calls setIntegerParam() or setDoubleParam() for each item that it polls.
   *
   * \param[out] moving A flag that is set indicating that the axis is moving (1) or done (0)
+  *
+  * \return The result of callParamCallbacks()
   */
 asynStatus FeturaPlusAxis::poll(bool *moving) { 
     asynStatus status = asynError;
@@ -502,6 +517,14 @@ int FeturaPlusAxis::getCurrentPosition() {
     return readback;
 }
 
+/** Calculates the checksum of a command.
+  * To be appended to the command before sending everything to the controller.
+  *
+  * \param[in] frame        Command character-array
+  * \param[in] frame_length Number of characters in frame
+  *
+  * \return 8-bit checksum
+  */
 unsigned char FeturaPlusAxis::calculateChecksum(char *frame, size_t frame_length) {
     unsigned int sum=0;
 
@@ -512,6 +535,14 @@ unsigned char FeturaPlusAxis::calculateChecksum(char *frame, size_t frame_length
     return sum;
 }
 
+/** Confirms the checksum of a reply.
+  * Calculates the 8-bit checksum of a character-array reply frame, and checks it against the appended checksum.
+  *
+  * \param[in] frame        Command character-array
+  * \param[in] frame_length Number of characters in frame
+  *
+  * \return 1 if checksum is correct, 0 otherwise
+  */
 bool FeturaPlusAxis::checkChecksumAtEnd(char *frame, size_t frame_length) {
     unsigned char calculated_checksum = calculateChecksum(frame+1, frame_length-2);
     unsigned char given_checksum = (unsigned char)(frame[frame_length-1]);
