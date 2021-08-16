@@ -254,7 +254,7 @@ void FeturaPlusAxis::report(FILE *fp, int level) {
   * \param[in] maxVelocity   Motion parameter
   * \param[in] acceleration  Motion parameter
   *
-  * \return The result of callParamCallbacks()
+  * \return Result of callParamCallbacks() call
   */
 asynStatus FeturaPlusAxis::move(double position, int relative, double minVelocity, double maxVelocity, double acceleration) {
     asynStatus status = asynError;
@@ -324,7 +324,7 @@ asynStatus FeturaPlusAxis::move(double position, int relative, double minVelocit
   * \param[in] acceleration  Motion parameter
   * \param[in] forwards      1 if user wants to home forward, 0 for reverse
   *
-  * \return The result of callParamCallbacks()
+  * \return Result of callParamCallbacks() call
   */
 asynStatus FeturaPlusAxis::home(double minVelocity, double maxVelocity, double acceleration, int forwards) {
     asynStatus status = asynError;
@@ -373,7 +373,7 @@ asynStatus FeturaPlusAxis::home(double minVelocity, double maxVelocity, double a
   *
   * \param[out] moving A flag that is set indicating that the axis is moving (1) or done (0)
   *
-  * \return The result of callParamCallbacks()
+  * \return Result of callParamCallbacks() call
   */
 asynStatus FeturaPlusAxis::poll(bool *moving) { 
     asynStatus status = asynError;
