@@ -4,8 +4,8 @@ Use this Docker configuration to generate a (non-optimized) container of Debian 
 
 Shell scripts to help creating the container, run it, start it, are also provided.
 
-The Fetura+ controller is expected to be connected to /dev/ttyUSB0. If this is not the case, you need to:
-- Edit *ttyusb_feturacmd.sed* and replace _ttyS0_ with the correct serial connection.
-- Edit *Dockerfile* and uncomment the _RUN_ command that uses the above file to patch the serial connection of the IOC.
-- Edit *docker_run_feturaioc.sh* and replace _/dev/ttyUSB0_ with the correct serial connection.
+The configuration of **qioptiqFeturaIOC** expects the controller in /dev/ttyUSB0. If this is not the case, you need to:
+- Edit **ttyusb_feturacmd.sed** and replace _ttyS0_ with the correct serial connection.
+- Edit **Dockerfile** and uncomment the _RUN_ command that uses the above file to patch the serial connection of the IOC.
+- Edit **docker_run_feturaioc.sh** and replace _/dev/ttyUSB0_ with the correct serial connection.
 
