@@ -58,6 +58,15 @@ public:
 
     asynStatus poll(bool *moving);
 
+    // Class-wide methods
+    static bool buildMoveCommand(char *buffer, unsigned pos);
+
+    static bool gotAcknowledged(const char *buffer, size_t nread, bool& wrong_reply);
+    static bool extractMoveTimeout(const char *buffer, size_t nread, bool& got_timeout, bool& wrong_reply, bool& wrong_prefix, bool& wrong_checksum);
+    static bool extractReadback(const char *buffer, size_t nread, int& readback, bool& wrong_reply, bool& wrong_prefix, bool& wrong_checksum);
+    static bool extractHomedState(const char *buffer, size_t nread, int& is_homed, bool& wrong_reply, bool& wrong_prefix, bool& wrong_checksum);
+    static bool extractBusyState(const char *buffer, size_t nread, int& is_busy, bool& wrong_reply, bool& wrong_prefix, bool& wrong_checksum);
+
 protected:
     // Specific class methods
     void setStatusProblem(asynStatus status);
@@ -65,10 +74,6 @@ protected:
     int getHomedState();
     int getBusyState();
     int getCurrentPosition();
-
-    // Class-wide methods
-    static unsigned char calculateChecksum(char *frame, size_t frame_length);
-    static bool checkChecksumAtEnd(char *frame, size_t frame_length);
 
 private:
     FeturaPlusController *pC_; // Pointer to the asynMotorController to which this axis belongs
@@ -89,11 +94,23 @@ public:
     FeturaPlusAxis* getAxis(asynUser *pasynUser);
     FeturaPlusAxis* getAxis(int axisNo);
 
+    // Class-wide methods
+    static bool buildSimpleCommand(char *buffer, const unsigned char cmd[], size_t cmd_len);
+
+    static bool gotSynched(const char *buffer, size_t nread);
+    static bool extractSerialNumber(const char *buffer, size_t nread, unsigned& serial_nr, bool& wrong_reply, bool& wrong_prefix, bool& wrong_checksum);
+    static bool extractFirmware(const char *buffer, size_t nread, unsigned& firmware_low, unsigned& firmware_high, bool& wrong_reply, bool& wrong_prefix, bool& wrong_checksum);
+
+    static unsigned char calculateChecksum(const char *frame, size_t frame_length);
+    static bool checkChecksumAtEnd(const char *frame, size_t frame_length);
+
 protected:
     // Specific class methods
     asynStatus writeReadController(size_t nwrite, size_t *nread);
 
 #define NUM_FETURA_PARAMS 0
+
+private:
 
 friend class FeturaPlusAxis;
 };

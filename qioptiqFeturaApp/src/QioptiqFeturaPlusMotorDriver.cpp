@@ -11,21 +11,22 @@ October 2020
 #include <stdlib.h>
 #include <math.h>
 
+#include "QioptiqFeturaPlusMotorDriver.h"
+
 #include <iocsh.h>
 #include <epicsThread.h>
 
 #include <asynOctetSyncIO.h>
 
-#include <asynMotorController.h>
-#include <asynMotorAxis.h>
-
 #include <epicsExport.h>
 
-#include "QioptiqFeturaPlusMotorDriver.h"
 
 
+#define RESET_SLEEP        0.501
+#define HOMING_SLEEP       1.0
+#define CONTROLLER_TIMEOUT 0.11
 
-#define FETURAPLUS_CONTROLLER_TIMEOUT 0.11
+
 
 static const char *driverName = "FeturaPlusOptics";
 
@@ -55,20 +56,15 @@ FeturaPlusController::FeturaPlusController(const char *portName, const char *asy
     asynPrint(this->pasynUserSelf, ASYN_TRACE_FLOW, "%s:%s: Creating Fetura+ controller %s to asyn %s with %d axes\n", driverName, functionName, portName, asynPortName, numAxes);
     status = pasynOctetSyncIO->connect(asynPortName, 0, &pasynUserController_, NULL);
     if (status) {
-        asynPrint(this->pasynUserSelf, ASYN_TRACE_ERROR, "%s:%s: cannot connect to fetura+ %s controller\n", driverName, functionName, portName);
+        asynPrint(this->pasynUserSelf, ASYN_TRACE_ERROR, "%s:%s: cannot connect to Fetura+ controller at asyn %s\n", driverName, functionName, asynPortName);
     } else {
         pasynOctetSyncIO->setInputEos(pasynUserController_, "", 0);
         pasynOctetSyncIO->setOutputEos(pasynUserController_, "", 0);
-
-        memcpy(this->outString_, SYNC_CMD, sizeof(SYNC_CMD));
-        this->writeReadController(sizeof(SYNC_CMD), &nread);
-        if (nread == sizeof(SYNC_REPLY)) {
-            if (!memcmp(this->inString_, SYNC_REPLY, sizeof(SYNC_REPLY))) {
-            } else {
-                asynPrint(this->pasynUserSelf, ASYN_TRACE_ERROR, "%s:%s: unable to synchronize with fetura+ %s controller\n", driverName, functionName, portName);
-            }
-        } else {
-            asynPrint(this->pasynUserSelf, ASYN_TRACE_ERROR, "%s:%s: unable to synchronize with fetura+ %s controller\n", driverName, functionName, portName);
+        
+        buildSimpleCommand(this->outString_, SYNC_CMD, sizeof(SYNC_CMD));
+        writeReadController(sizeof(SYNC_CMD), &nread);
+        if (!gotSynched(this->inString_, nread)) {
+            asynPrint(this->pasynUserSelf, ASYN_TRACE_ERROR, "%s:%s: unable to synchronize with Fetura+ %s\n", driverName, functionName, portName);
         }
     }
 
@@ -81,68 +77,57 @@ FeturaPlusController::FeturaPlusController(const char *portName, const char *asy
 }
 
 /** Reports on status of the driver.
-  * If level > 0 then serial number, firmware version, axes information is printed.
+  * If details > 0 then information is printed about each axis.
+  * After printing controller-specific information calls asynMotorController::report()
   *
-  * \param[in] fp The file pointer on which report information will be written
-  * \param[in] level The level of report detail desired
+  * \param[in] fp     The file pointer on which report information will be written
+  * \param[in] level  The level of report detail desired
   */
 void FeturaPlusController::report(FILE *fp, int level) {
     size_t nread;
-    unsigned serialnr=0, firmlo=0, firmhi=0;
+    unsigned serialnr = 0, firmlo = 0, firmhi = 0;
+    bool reply_check, prefix_check, checksum_check;
 
     fprintf(fp, "Qioptiq Fetura+ optics controller %s, numAxes=%d, moving poll period=%f, idle poll period=%f\n", this->portName, numAxes_, movingPollPeriod_, idlePollPeriod_);
 
     if (level > 0) {
         // Retrieve serial number
-        memcpy(this->outString_, SERIALNUMBER_CMD, sizeof(SERIALNUMBER_CMD));
-        this->writeReadController(sizeof(SERIALNUMBER_CMD), &nread);
-        if (nread == sizeof(SERIALNUMBER_REPLY_PREFIX)+5) {
-            if (!memcmp(this->inString_, SERIALNUMBER_REPLY_PREFIX, sizeof(SERIALNUMBER_REPLY_PREFIX))) {
-                if (FeturaPlusAxis::checkChecksumAtEnd(this->inString_,nread)) {
-                    serialnr = (unsigned char)(this->inString_[sizeof(SERIALNUMBER_REPLY_PREFIX)] << 24) + 
-                               (unsigned char)(this->inString_[sizeof(SERIALNUMBER_REPLY_PREFIX)+1] << 16) + 
-                               (unsigned char)(this->inString_[sizeof(SERIALNUMBER_REPLY_PREFIX)+2] << 8) + 
-                               (unsigned char)(this->inString_[sizeof(SERIALNUMBER_REPLY_PREFIX)+3]);
-                } else {
-                    asynPrint(this->pasynUserSelf, ASYN_TRACE_ERROR, "Wrong checksum while getting fetura+ %s serial number\n", this->portName);
-                }
+        buildSimpleCommand(this->outString_, SERIALNUMBER_CMD, sizeof(SERIALNUMBER_CMD));
+        writeReadController(sizeof(SERIALNUMBER_CMD), &nread);
+        if (extractSerialNumber(this->inString_, nread, serialnr, reply_check, prefix_check, checksum_check)) {
+            if (serialnr) {
+                fprintf(fp, "  serial number=%X\n", serialnr);
             } else {
-                asynPrint(this->pasynUserSelf, ASYN_TRACE_ERROR, "Wrong answer while getting fetura+ %s serial number\n", this->portName);
+                fprintf(fp, "  unknown serial number\n");
             }
         } else {
-            asynPrint(this->pasynUserSelf, ASYN_TRACE_ERROR, "Wrong answer while getting fetura+ %s serial number (read %zu bytes)\n", this->portName, nread);
-        }
-        if (serialnr) {
-            fprintf(fp, "  serial number=%X\n", serialnr);
-        } else {
-            fprintf(fp, "  unknown serial number\n");
+            if (checksum_check) {
+                asynPrint(this->pasynUserSelf, ASYN_TRACE_ERROR, "Wrong checksum while getting Fetura+ %s serial number\n", this->portName);
+            } else if (prefix_check) {
+                asynPrint(this->pasynUserSelf, ASYN_TRACE_ERROR, "Wrong answer while getting Fetura+ %s serial number\n", this->portName);
+            } else {
+                asynPrint(this->pasynUserSelf, ASYN_TRACE_ERROR, "Wrong answer while getting Fetura+ %s serial number (read %zu bytes)\n", this->portName, nread);
+            }
         }
 
         // Retrieve firmware version
-        memcpy(this->outString_, FIRMWARE_CMD, sizeof(FIRMWARE_CMD));
-        this->writeReadController(sizeof(FIRMWARE_CMD), &nread);
-        if (nread == sizeof(FIRMWARE_REPLY_PREFIX)+5) {
-            if (!memcmp(this->inString_, FIRMWARE_REPLY_PREFIX, sizeof(FIRMWARE_REPLY_PREFIX))) {
-                if (FeturaPlusAxis::checkChecksumAtEnd(this->inString_, nread)) {
-                    firmhi = (unsigned char)(this->inString_[sizeof(FIRMWARE_REPLY_PREFIX)+2] << 8) + 
-                             (unsigned char)(this->inString_[sizeof(FIRMWARE_REPLY_PREFIX)+3]);
-                    firmlo = (unsigned char)(this->inString_[sizeof(FIRMWARE_REPLY_PREFIX)] << 8) + 
-                             (unsigned char)(this->inString_[sizeof(FIRMWARE_REPLY_PREFIX)+1]);
-                } else {
-                    asynPrint(this->pasynUserSelf, ASYN_TRACE_ERROR, "Wrong checksum while getting fetura+ %s firmware version\n", this->portName);
-                }
+        buildSimpleCommand(this->outString_, FIRMWARE_CMD, sizeof(FIRMWARE_CMD));
+        writeReadController(sizeof(FIRMWARE_CMD), &nread);
+        if (extractFirmware(this->inString_, nread, firmlo, firmhi, reply_check, prefix_check, checksum_check)) {
+            if ((firmhi) || (firmlo)) {
+                fprintf(fp, "  firmware version=%d.%d\n", firmhi, firmlo);
             } else {
-                asynPrint(this->pasynUserSelf, ASYN_TRACE_ERROR, "Wrong answer while getting fetura+ %s firmware version\n", this->portName);
+                fprintf(fp, "  unknown firmware version\n");
             }
         } else {
-            asynPrint(this->pasynUserSelf, ASYN_TRACE_ERROR, "Wrong answer while getting fetura+ %s firmware version (read %zu bytes)\n", this->portName, nread);
+            if (checksum_check) {
+                asynPrint(this->pasynUserSelf, ASYN_TRACE_ERROR, "Wrong checksum while getting Fetura+ %s firmware version\n", this->portName);
+            } else if (prefix_check) {
+                asynPrint(this->pasynUserSelf, ASYN_TRACE_ERROR, "Wrong answer while getting Fetura+ %s firmware version\n", this->portName);
+            } else {
+                asynPrint(this->pasynUserSelf, ASYN_TRACE_ERROR, "Wrong answer while getting Fetura+ %s firmware version (read %zu bytes)\n", this->portName, nread);
+            }
         }
-        if ((firmhi) || (firmlo)) {
-            fprintf(fp, "  firmware version=%d.%d\n", firmhi, firmlo);
-        } else {
-            fprintf(fp, "  unknown firmware version\n");
-        }
-
     }
 
     // Call the base class method
@@ -151,9 +136,9 @@ void FeturaPlusController::report(FILE *fp, int level) {
 
 /** Returns a pointer to an FeturaPlusAxis object.
   *
-  * \param[in] pasynUser asynUser structure that encodes the axis index number
+  * \param[in] pasynUser  An asynUser structure that encodes the axis index number.
   *
-  * \return FeturaPlusAxis object or NULL if the axis number encoded in pasynUser is invalid
+  * \return A FeturaPlusAxis object or NULL if the axis number encoded in pasynUser is invalid
   */
 FeturaPlusAxis* FeturaPlusController::getAxis(asynUser *pasynUser) {
     return static_cast<FeturaPlusAxis*>(asynMotorController::getAxis(pasynUser));
@@ -161,19 +146,172 @@ FeturaPlusAxis* FeturaPlusController::getAxis(asynUser *pasynUser) {
 
 /** Returns a pointer to an FeturaPlusAxis object.
   *
-  * \param[in] axisNo Axis index number
+  * \param[in] axisNo  The axis index number.
   *
-  * \return FeturaPlusAxis object or NULL if the axis number encoded in pasynUser is invalid
+  * \return A FeturaPlusAxis object or NULL if the axis number encoded in pasynUser is invalid
   */
 FeturaPlusAxis* FeturaPlusController::getAxis(int axisNo) {
     return static_cast<FeturaPlusAxis*>(asynMotorController::getAxis(axisNo));
 }
 
+/** All the following methods generate a command string to be sent to the controller.
+  *
+  */
+bool FeturaPlusController::buildSimpleCommand(char *buffer, const unsigned char cmd[], size_t cmd_len) {
+    if ((!buffer) || (!cmd) || (cmd_len<=1)) {
+        return false;
+    }
+    memcpy(buffer, cmd, cmd_len);
+    return true;
+}
+
+/** Verifies the synchronize reply.
+  *
+  * \param[in] frame  Array of bytes
+  * \param[in] nread  Size/length of array
+  *
+  * \return true if data frame matches the expected reply to a synchronize command
+  */
+bool FeturaPlusController::gotSynched(const char *buffer, size_t nread) {
+    bool res = false;
+    if (nread == sizeof(SYNC_REPLY)) {
+        if (!memcmp(buffer, SYNC_REPLY, sizeof(SYNC_REPLY))) {
+            res = true;
+        }
+    }
+    return res;
+}
+
+/** Extracts the controller serial number from a data frame.
+  *
+  * \param[in] frame  Array of bytes
+  * \param[in] nread  Size/length of array
+  *
+  * \param[out] serial_nr       Extracted serial number from the frame
+  * \param[out] wrong_reply     Set to true if frame is not of correct size
+  * \param[out] wrong_prefix    Set to true if frame prefix doesn't match the expected for the serial number reply
+  * \param[out] wrong_checksum  Set to true if frame contained a miscalculated checksum
+  *
+  * \return true if frame prefix is correct and calculated checksum matches the one embedded in the frame
+  */
+bool FeturaPlusController::extractSerialNumber(const char *buffer, size_t nread, unsigned& serial_nr, bool& wrong_reply, bool& wrong_prefix, bool& wrong_checksum) {
+    bool res = false;
+    unsigned sernr = 0;
+
+    wrong_reply    = false;
+    wrong_prefix   = false;
+    wrong_checksum = false;
+    if (!buffer) {
+        return false;
+    }
+
+    if (nread == sizeof(SERIALNUMBER_REPLY_PREFIX)+5) {
+        if (!memcmp(buffer, SERIALNUMBER_REPLY_PREFIX, sizeof(SERIALNUMBER_REPLY_PREFIX))) {
+            if (checkChecksumAtEnd(buffer, nread)) {
+                sernr = (unsigned char)(buffer[sizeof(SERIALNUMBER_REPLY_PREFIX)] << 24) + 
+                        (unsigned char)(buffer[sizeof(SERIALNUMBER_REPLY_PREFIX)+1] << 16) + 
+                        (unsigned char)(buffer[sizeof(SERIALNUMBER_REPLY_PREFIX)+2] << 8) + 
+                        (unsigned char)(buffer[sizeof(SERIALNUMBER_REPLY_PREFIX)+3]);
+                res = true;
+            } else {
+                wrong_checksum = true;
+            }
+        } else {
+            wrong_prefix = true;
+        }
+    } else {
+        wrong_reply = true;
+    }
+
+    serial_nr = sernr;
+    return res;
+}
+
+/** Extracts the firmware version from a data frame.
+  *
+  * \param[in] frame  Array of bytes
+  * \param[in] nread  Size/length of array
+  *
+  * \param[out] firmware_low    Extracted firmware version least-significant number
+  * \param[out] firmware_high   Extracted firmware version most-significant number
+  * \param[out] wrong_reply     Set to true if frame is not of correct size
+  * \param[out] wrong_prefix    Set to true if frame prefix doesn't match the expected for the firmware reply
+  * \param[out] wrong_checksum  Set to true if frame contained a miscalculated checksum
+  *
+  * \return true if frame prefix is correct and calculated checksum matches the one embedded in the frame
+  */
+bool FeturaPlusController::extractFirmware(const char *buffer, size_t nread, unsigned& firmware_low, unsigned& firmware_high, bool& wrong_reply, bool& wrong_prefix, bool& wrong_checksum) {
+    bool res = false;
+    unsigned firlo = 0, firhi = 0;
+
+    wrong_reply    = false;
+    wrong_prefix   = false;
+    wrong_checksum = false;
+    if (!buffer) {
+        return false;
+    }
+
+    if (nread == sizeof(FIRMWARE_REPLY_PREFIX)+5) {
+        if (!memcmp(buffer, FIRMWARE_REPLY_PREFIX, sizeof(FIRMWARE_REPLY_PREFIX))) {
+            if (checkChecksumAtEnd(buffer, nread)) {
+                firhi = (unsigned char)(buffer[sizeof(FIRMWARE_REPLY_PREFIX)+2] << 8) + 
+                        (unsigned char)(buffer[sizeof(FIRMWARE_REPLY_PREFIX)+3]);
+                firlo = (unsigned char)(buffer[sizeof(FIRMWARE_REPLY_PREFIX)] << 8) + 
+                        (unsigned char)(buffer[sizeof(FIRMWARE_REPLY_PREFIX)+1]);
+                res = true;
+            } else {
+                wrong_checksum = true;
+            }
+        } else {
+            wrong_prefix = true;
+        }
+    } else {
+        wrong_reply = true;
+    }
+
+    firmware_low  = firlo;
+    firmware_high = firhi;
+    return res;
+}
+
+/** Calculates the checksum of a data frame.
+  *
+  * \param[in] frame         Array of bytes
+  * \param[in] frame_length  Size/length of array
+  *
+  * \return Checksum: least-significative byte of the sum of all bytes
+  */
+unsigned char FeturaPlusController::calculateChecksum(const char *frame, size_t frame_length) {
+    unsigned int sum = 0;
+
+    for (size_t i=0; i<frame_length; i++) {
+        sum += (unsigned char)(frame[i]);
+    }
+    sum = sum & 0xFF;
+    return sum;
+}
+
+/** Verifies the checksum at the end of a data frame.
+  *
+  * \param[in] frame         Array of bytes; checksum is expected as the very last byte
+  *                          the first byte (acknowledgement 0x4F is discarded)
+  * \param[in] frame_length  Size/length of array, including acknowledgement and checksum bytes
+  *
+  * \return true if calculated checksum matches the one embedded in the data frame
+  */
+bool FeturaPlusController::checkChecksumAtEnd(const char *frame, size_t frame_length) {
+    unsigned char calculated_checksum = calculateChecksum(frame+1, frame_length-2);
+    unsigned char given_checksum = (unsigned char)(frame[frame_length-1]);
+    return (calculated_checksum==given_checksum);
+}
+
 /** Wrapper of writeReadController with explicit output length, avoiding usage of strlen().
   *
-  * \param[in] nwrite Number of bytes to write
+  * \param[in] nwrite  Number of bytes to write
   *
-  * \param[out] nread Number of bytes read
+  * \param[out] nread  Number of bytes read
+  *
+  * \return Result of pasynOctetSyncIO::writeRead
   */
 asynStatus FeturaPlusController::writeReadController(size_t nwrite, size_t *nread) {
     size_t nwrote;
@@ -183,7 +321,7 @@ asynStatus FeturaPlusController::writeReadController(size_t nwrite, size_t *nrea
     return pasynOctetSyncIO->writeRead(pasynUserController_,
                                        outString_, nwrite,
                                        inString_, sizeof(inString_),
-                                       FETURAPLUS_CONTROLLER_TIMEOUT,
+                                       CONTROLLER_TIMEOUT,
                                        &nwrote, nread, &eomReason);
 }
 
@@ -193,54 +331,42 @@ asynStatus FeturaPlusController::writeReadController(size_t nwrite, size_t *nrea
 
 /** Creates a new FeturaPlusAxis object.
   *
-  * \param[in] pC Pointer to the FeturaPlusController to which this axis belongs
-  * \param[in] axisNo Index number of this axis, range 0 to pC->numAxes_-1
+  * \param[in] pC      Pointer to the FeturaPlusController to which this axis belongs
+  * \param[in] axisNo  Index number of this axis, range 0 to pC->numAxes_-1
   */
 FeturaPlusAxis::FeturaPlusAxis(FeturaPlusController *pC, int axisNo): asynMotorAxis(pC, axisNo), pC_(pC) {
-    int home_done=-1;
+    int home_done = -1;
 
     home_done = getHomedState();
-    if (home_done!=-1) {
+    if (home_done != -1) {
         this->setIntegerParam(pC_->motorStatusHomed_, home_done);
     }
 
     callParamCallbacks();
 }
 
-/** Reports on status of the axis.
-  * If level > 0 then homing information is printed.
+/** Reports on status of the driver.
+  * If details > 0 then information is printed about each axis.
+  * After printing controller-specific information calls asynMotorAxis::report()
   *
-  * \param[in] fp The file pointer on which report information will be written
-  * \param[in] level The level of report detail desired
+  * \param[in] fp     The file pointer on which report information will be written
+  * \param[in] level  The level of report detail desired
   */
 void FeturaPlusAxis::report(FILE *fp, int level) {
-    int home_done=-1;
+    int home_done = -1;
 
     if (level > 0) {
         home_done = getHomedState();
         if (home_done!=-1) {
             this->setIntegerParam(pC_->motorStatusHomed_, home_done);
             if (home_done) {
-                fprintf(fp,
-                    "  axis %d\n"
-                    "  homing = done\n",
-                    this->axisNo_);
+                fprintf(fp, "  Homing done\n");
             } else {
-                fprintf(fp,
-                    "  axis %d\n"
-                    "  homing = in progress\n",
-                    this->axisNo_);
+                fprintf(fp, "  Homing in progress\n");
             } 
         } else {
-            fprintf(fp,
-                "  axis %d\n"
-                "  homing = unknown\n",
-                this->axisNo_);
+            fprintf(fp, "  Homing unknown\n");
         }
-    } else {
-        fprintf(fp,
-            "  axis %d\n",
-            this->axisNo_);
     }
 
     asynMotorAxis::report(fp, level);
@@ -254,64 +380,45 @@ void FeturaPlusAxis::report(FILE *fp, int level) {
   * \param[in] maxVelocity   Motion parameter
   * \param[in] acceleration  Motion parameter
   *
-  * \return Result of callParamCallbacks() call
+  * \return The result of callParamCallbacks()
   */
 asynStatus FeturaPlusAxis::move(double position, int relative, double minVelocity, double maxVelocity, double acceleration) {
     asynStatus status = asynError;
     size_t nread;
-    int errors=0, moveto_pos=position, is_busy;
-    unsigned char checksum;
+    int moveto_pos = position;
+    bool timeout, reply_check, prefix_check, checksum_check;
 
     // First check if ready
-    is_busy = getBusyState();
-    if (is_busy == 0) {
+    if (getBusyState() == 0) {
         setIntegerParam(pC_->motorStatusDone_, 0);
 
-        // Select move mode depending on velocity: fast-zoom mode, or continuous-zoom mode when VELO>1000
+        // Select how to move: CAM: default FZM: Fast Zoom Mode or Continuous Zoom Mode
         if (maxVelocity > MOVEMODE_THRESHOLD) {
-            asynPrint(pC_->pasynUserSelf, ASYN_TRACE_FLOW, "Moving fetura+ %s to %f in CZM\n", pC_->portName, position);
+            asynPrint(pC_->pasynUserSelf, ASYN_TRACE_FLOW, "Moving Fetura+ %s to %f in CZM\n", pC_->portName, position);
             position += MOVEMODE_THRESHOLD;
         } else {
-            asynPrint(pC_->pasynUserSelf, ASYN_TRACE_FLOW, "Moving fetura+ %s to %f in FZM\n", pC_->portName, position);
+            asynPrint(pC_->pasynUserSelf, ASYN_TRACE_FLOW, "Moving Fetura+ %s to %f in FZM\n", pC_->portName, position);
         }
 
-        memcpy(pC_->outString_, MOVETO_CMD_PREFIX, sizeof(MOVETO_CMD_PREFIX));
-        pC_->outString_[sizeof(MOVETO_CMD_PREFIX)] = (moveto_pos & 0xFF00)>>8;
-        pC_->outString_[sizeof(MOVETO_CMD_PREFIX)+1] = (moveto_pos & 0xFF);
-        checksum = calculateChecksum(pC_->outString_, sizeof(MOVETO_CMD_PREFIX)+2);
-        pC_->outString_[sizeof(MOVETO_CMD_PREFIX)+2] = checksum;
-
+        buildMoveCommand(pC_->outString_, moveto_pos);
         pC_->writeReadController(sizeof(MOVETO_CMD_PREFIX)+3, &nread);
-        if ((nread == sizeof(ACKNOWLEDGE)) || (nread == sizeof(READBACK_REPLY_PREFIX)+3)) {
-            if (nread != sizeof(ACKNOWLEDGE)) {
-                if ((!memcmp(pC_->inString_, READBACK_REPLY_PREFIX, sizeof(READBACK_REPLY_PREFIX))) && (pC_->inString_[sizeof(READBACK_REPLY_PREFIX)] == 0x00) &&
-                    ((pC_->inString_[sizeof(READBACK_REPLY_PREFIX)+1] == 0x00) || (pC_->inString_[sizeof(READBACK_REPLY_PREFIX)+1] == 0x01))) {
-                    if (checkChecksumAtEnd(pC_->inString_, nread)) {
-                        errors = 1-pC_->inString_[sizeof(READBACK_REPLY_PREFIX)+1];
-                    } else {
-                        asynPrint(pC_->pasynUserSelf, ASYN_TRACE_ERROR, "Wrong checksum while moving fetura+ %s\n", pC_->portName);
-                        errors++;
-                    }
-                }
+        if (extractMoveTimeout(pC_->inString_, nread, timeout, reply_check, prefix_check, checksum_check)) {
+            if (timeout) {
+                asynPrint(pC_->pasynUserSelf, ASYN_TRACE_ERROR, "Timeout while moving Fetura+ %s\n", pC_->portName);
             } else {
-                if (!memcmp(pC_->inString_, ACKNOWLEDGE, sizeof(ACKNOWLEDGE))) {
-                } else {
-                    asynPrint(pC_->pasynUserSelf, ASYN_TRACE_ERROR, "Unrecognized reply while moving fetura+ %s\n", pC_->portName);
-                    errors++;
-                }
+                status = asynSuccess;
             }
         } else {
-            asynPrint(pC_->pasynUserSelf, ASYN_TRACE_ERROR, "Unrecognized reply while moving fetura+ %s\n", pC_->portName);
-            errors++;
+            if (checksum_check) {
+                asynPrint(pC_->pasynUserSelf, ASYN_TRACE_ERROR, "Wrong checksum while moving Fetura+ %s\n", pC_->portName);
+            } else if (prefix_check) {
+                asynPrint(pC_->pasynUserSelf, ASYN_TRACE_ERROR, "Wrong answer while moving Fetura+ %s\n", pC_->portName);
+            } else {
+                asynPrint(pC_->pasynUserSelf, ASYN_TRACE_ERROR, "Wrong answer while moving Fetura+ %s (read %zu bytes)\n", pC_->portName, nread);
+            }
         }
-    } else {
-        asynPrint(pC_->pasynUserSelf, ASYN_TRACE_FLOW, "Cannot move fetura+ %s because device is busy\n", pC_->portName);
-        errors++;
     }
 
-    if (!errors) {
-        status = asynSuccess;
-    }
     setStatusProblem(status);
 
     return callParamCallbacks();
@@ -324,56 +431,56 @@ asynStatus FeturaPlusAxis::move(double position, int relative, double minVelocit
   * \param[in] acceleration  Motion parameter
   * \param[in] forwards      1 if user wants to home forward, 0 for reverse
   *
-  * \return Result of callParamCallbacks() call
+  * \return The result of callParamCallbacks()
   */
 asynStatus FeturaPlusAxis::home(double minVelocity, double maxVelocity, double acceleration, int forwards) {
     asynStatus status = asynError;
     size_t nread;
-    int errors=0, is_busy;
+    bool reply_check;
+    int home_done;
 
     // First check if ready
-    is_busy = getBusyState();
-    if (is_busy == 0) {
+    if (getBusyState() == 0) {
         setIntegerParam(pC_->motorStatusDone_, 0);
         setDoubleParam(pC_->motorPosition_, 0);
 
-        asynPrint(pC_->pasynUserSelf, ASYN_TRACE_FLOW, "Homing fetura+ %s...\n", pC_->portName);
-
         // Reset controller
-        memcpy(pC_->outString_, RESET_CMD, sizeof(RESET_CMD));
+        pC_->buildSimpleCommand(pC_->outString_, RESET_CMD, sizeof(RESET_CMD));
         pC_->writeReadController(sizeof(RESET_CMD), &nread);
-        if (nread == sizeof(ACKNOWLEDGE)) {
-            if (!memcmp(pC_->inString_, ACKNOWLEDGE, sizeof(ACKNOWLEDGE))) {
-                // Wait and flush communications
-                epicsThreadSleep(0.501);
-                pasynOctetSyncIO->flush(pC_->pasynUserController_);
-            } else {
-                asynPrint(pC_->pasynUserSelf, ASYN_TRACE_ERROR, "Unrecognized reply while homing fetura+ %s\n", pC_->portName);
-                errors++;
+        if (gotAcknowledged(pC_->inString_, nread, reply_check)) {
+            // Wait and flush communications
+            epicsThreadSleep(RESET_SLEEP);
+            pasynOctetSyncIO->flush(pC_->pasynUserController_);
+
+            epicsThreadSleep(HOMING_SLEEP);
+            home_done = getHomedState();
+            if (home_done != -1) {
+                this->setIntegerParam(pC_->motorStatusHomed_, home_done);
             }
         } else {
-            asynPrint(pC_->pasynUserSelf, ASYN_TRACE_ERROR, "Wrong answer while homing fetura+ %s (read %zu bytes)\n", pC_->portName, nread);
-            errors++;
+            if (reply_check) {
+                asynPrint(pC_->pasynUserSelf, ASYN_TRACE_ERROR, "Wrong answer while homing Fetura+ %s (read %zu bytes)\n", pC_->portName, nread);
+            } else {
+                asynPrint(pC_->pasynUserSelf, ASYN_TRACE_ERROR, "Unrecognized reply while homing Fetura+ %s\n", pC_->portName);
+            }
         }
-    } else {
-        asynPrint(pC_->pasynUserSelf, ASYN_TRACE_FLOW, "Cannot home fetura+ %s because device is busy\n", pC_->portName);
-        errors++;
     }
 
-    if (!errors) {
-        status = asynSuccess;
-    }
     setStatusProblem(status);
 
     return callParamCallbacks();
 }
 
 /** Polls the axis.
-  * Reads the busy state and readback position and calls setIntegerParam() or setDoubleParam() for each item that it polls.
+  * This function reads the controller position, encoder position, the limit status, the moving status, 
+  * and the drive power-on status.  It does not current detect following error, etc. but this could be
+  * added.
+  * It calls setIntegerParam() and setDoubleParam() for each item that it polls,
+  * and then calls callParamCallbacks() at the end.
   *
-  * \param[out] moving A flag that is set indicating that the axis is moving (1) or done (0)
+  * \param[out] moving  A flag that is set indicating that the axis is moving (1) or done (0).
   *
-  * \return Result of callParamCallbacks() call
+  * \return The result of callParamCallbacks()
   */
 asynStatus FeturaPlusAxis::poll(bool *moving) { 
     asynStatus status = asynError;
@@ -407,9 +514,243 @@ asynStatus FeturaPlusAxis::poll(bool *moving) {
     return callParamCallbacks();
 }
 
+/** All the following methods generate a command string to be sent to the controller.
+  *
+  */
+bool FeturaPlusAxis::buildMoveCommand(char *buffer, unsigned pos) {
+    unsigned char checksum;
+
+    if (!buffer) {
+        return false;
+    }
+
+    memcpy(buffer, MOVETO_CMD_PREFIX, sizeof(MOVETO_CMD_PREFIX));
+    buffer[sizeof(MOVETO_CMD_PREFIX)] = (pos & 0xFF00)>>8;
+    buffer[sizeof(MOVETO_CMD_PREFIX)+1] = (pos & 0xFF);
+    checksum = FeturaPlusController::calculateChecksum(buffer, sizeof(MOVETO_CMD_PREFIX)+2);
+    buffer[sizeof(MOVETO_CMD_PREFIX)+2] = checksum;
+
+    return true;
+}
+
+/** Verifies an acknowledgement reply.
+  *
+  * \param[in] frame  Array of bytes
+  * \param[in] nread  Size/length of array
+  *
+  * \param[out] wrong_reply  Set to true if frame is not of correct size
+  *
+  * \return true if data frame matches the expected reply to a home (or move) command
+  */
+bool FeturaPlusAxis::gotAcknowledged(const char *buffer, size_t nread, bool& wrong_reply) {
+    bool res = false;
+
+    wrong_reply = false;
+    if (!buffer) {
+        return false;
+    }
+
+    if (nread == sizeof(ACKNOWLEDGE)) {
+        if (!memcmp(buffer, ACKNOWLEDGE, sizeof(ACKNOWLEDGE))) {
+            res = true;
+        }
+    } else {
+        wrong_reply = true;
+    }
+
+    return res;
+}
+
+/** Extracts the readback position from a data frame.
+  *
+  * \param[in] frame  Array of bytes
+  * \param[in] nread  Size/length of array
+  *
+  * \param[out] readback        Extracted current zoom position
+  * \param[out] wrong_reply     Set to true if frame is not of correct size
+  * \param[out] wrong_prefix    Set to true if frame prefix doesn't match the expected for the readback reply
+  * \param[out] wrong_checksum  Set to true if frame contained a miscalculated checksum
+  *
+  * \return true if frame prefix is correct and calculated checksum matches the one embedded in the frame
+  */
+bool FeturaPlusAxis::extractReadback(const char *buffer, size_t nread, int& readback, bool& wrong_reply, bool& wrong_prefix, bool& wrong_checksum) {
+    bool res = false;
+    int rb = -1;
+
+    wrong_reply    = false;
+    wrong_prefix   = false;
+    wrong_checksum = false;
+    if (!buffer) {
+        return false;
+    }
+
+    if (nread == sizeof(READBACK_REPLY_PREFIX)+3) {
+        if (!memcmp(buffer, READBACK_REPLY_PREFIX, sizeof(READBACK_REPLY_PREFIX))) {
+            if (FeturaPlusController::checkChecksumAtEnd(buffer, nread)) {
+                rb = buffer[sizeof(READBACK_REPLY_PREFIX)] << 8;
+                rb += (unsigned char)(buffer[sizeof(READBACK_REPLY_PREFIX)+1]);
+                res = true;
+            } else {
+                wrong_checksum = true;
+            }
+        } else {
+            wrong_prefix = true;
+        }
+    } else {
+        wrong_reply = true;
+    }
+
+    readback = rb;
+    return res;
+}
+
+/** Extracts the homed status from a data frame.
+  *
+  * \param[in] frame  Array of bytes
+  * \param[in] nread  Size/length of array
+  *
+  * \param[out] is_homed        Extracted homed status
+  * \param[out] wrong_reply     Set to true if frame is not of correct size
+  * \param[out] wrong_prefix    Set to true if frame prefix doesn't match the expected for the homed reply
+  * \param[out] wrong_checksum  Set to true if frame contained a miscalculated checksum
+  *
+  * \return true if frame prefix is correct and calculated checksum matches the one embedded in the frame
+  */
+bool FeturaPlusAxis::extractHomedState(const char *buffer, size_t nread, int& is_homed, bool& wrong_reply, bool& wrong_prefix, bool& wrong_checksum) {
+    bool res = false;
+    int hom = -1;
+
+    wrong_reply    = false;
+    wrong_prefix   = false;
+    wrong_checksum = false;
+    if (!buffer) {
+        return false;
+    }
+
+    if (nread == sizeof(CHECKHOME_REPLY_PREFIX)+3) {
+        if (!memcmp(buffer, CHECKHOME_REPLY_PREFIX, sizeof(CHECKHOME_REPLY_PREFIX))) {
+            if ((buffer[sizeof(CHECKHOME_REPLY_PREFIX)] == 0x00) && 
+                ((buffer[sizeof(CHECKHOME_REPLY_PREFIX)+1] == 0x00) || (buffer[sizeof(CHECKHOME_REPLY_PREFIX)+1] == 0x01))) {
+                if (FeturaPlusController::checkChecksumAtEnd(buffer, nread)) {
+                    hom = buffer[sizeof(CHECKHOME_REPLY_PREFIX)+1];
+                    res = true;
+                } else {
+                    wrong_checksum = true;
+                }
+            } else {
+                wrong_prefix = true;
+            }
+        } else {
+            wrong_prefix = true;
+        }
+    } else {
+        wrong_reply = true;
+    }
+
+    is_homed = hom;
+    return res;
+}
+
+/** Extracts the controller busy status from a data frame.
+  *
+  * \param[in] frame  Array of bytes
+  * \param[in] nread  Size/length of array
+  *
+  * \param[out] is_busy         Extracted busy status
+  * \param[out] wrong_reply     Set to true if frame is not of correct size
+  * \param[out] wrong_prefix    Set to true if frame prefix doesn't match the expected for the busy reply
+  * \param[out] wrong_checksum  Set to true if frame contained a miscalculated checksum
+  *
+  * \return true if frame prefix is correct and calculated checksum matches the one embedded in the frame
+  */
+bool FeturaPlusAxis::extractBusyState(const char *buffer, size_t nread, int& is_busy, bool& wrong_reply, bool& wrong_prefix, bool& wrong_checksum) {
+    bool res = false;
+    int busy = -1;
+
+    wrong_reply    = false;
+    wrong_prefix   = false;
+    wrong_checksum = false;
+    if (!buffer) {
+        return false;
+    }
+
+    if (nread == sizeof(STATUS_REPLY_PREFIX)+3) {
+        if (!memcmp(buffer, STATUS_REPLY_PREFIX, sizeof(STATUS_REPLY_PREFIX))) {
+            if ((buffer[sizeof(STATUS_REPLY_PREFIX)] == 0x00) && 
+                ((buffer[sizeof(STATUS_REPLY_PREFIX)+1] == 0x00) || (buffer[sizeof(STATUS_REPLY_PREFIX)+1] == 0x01))) {
+                if (FeturaPlusController::checkChecksumAtEnd(buffer, nread)) {
+                    busy = buffer[sizeof(STATUS_REPLY_PREFIX)+1];
+                    res = true;
+                } else {
+                    wrong_checksum = true;
+                }
+            } else {
+                wrong_prefix = true;
+            }
+        } else {
+            wrong_prefix = true;
+        }
+    } else {
+        wrong_reply = true;
+    }
+
+    is_busy = busy;
+    return res;
+}
+
+/** Extracts the controller move-request status from a data frame.
+  *
+  * \param[in] frame  Array of bytes
+  * \param[in] nread  Size/length of array
+  *
+  * \param[out] got_timeou      Extracted move-request/got-timeout status
+  * \param[out] wrong_reply     Set to true if frame is not of correct size
+  * \param[out] wrong_prefix    Set to true if frame prefix doesn't match the expected for the move reply
+  * \param[out] wrong_checksum  Set to true if frame contained a miscalculated checksum
+  *
+  * \return true if frame prefix is correct and calculated checksum matches the one embedded in the frame
+  */
+bool FeturaPlusAxis::extractMoveTimeout(const char *buffer, size_t nread, bool& got_timeout, bool& wrong_reply, bool& wrong_prefix, bool& wrong_checksum) {
+    bool res = false;
+    int timeout = 1;
+
+    wrong_reply    = false;
+    wrong_prefix   = false;
+    wrong_checksum = false;
+    if (!buffer) {
+        return false;
+    }
+
+    if (nread == sizeof(ACKNOWLEDGE)) {
+        if (memcmp(buffer, ACKNOWLEDGE, sizeof(ACKNOWLEDGE))) {
+            wrong_prefix = true;
+        } else {
+            timeout = 0;
+            res = true;
+        }
+    } else if (nread == sizeof(READBACK_REPLY_PREFIX)+3) {
+        if ((!memcmp(buffer, READBACK_REPLY_PREFIX, sizeof(READBACK_REPLY_PREFIX))) && (buffer[sizeof(READBACK_REPLY_PREFIX)] == 0x00) &&
+                    ((buffer[sizeof(READBACK_REPLY_PREFIX)+1] == 0x00) || (buffer[sizeof(READBACK_REPLY_PREFIX)+1] == 0x01))) {
+            if (FeturaPlusController::checkChecksumAtEnd(buffer, nread)) {
+                timeout = buffer[sizeof(READBACK_REPLY_PREFIX)+1];
+                res = true;
+            } else {
+                wrong_checksum = true;
+            }
+        } else {
+            wrong_prefix = true;
+        }
+    } else {
+        wrong_reply = true;
+    }
+
+    got_timeout = timeout;
+    return res;
+}
+
 /** Raises the motor record problem status.
   *
-  * \param[in] status Last operation status
+  * \param[in] status  Last operation status
   */
 void FeturaPlusAxis::setStatusProblem(asynStatus status) {
     int status_problem;
@@ -429,27 +770,19 @@ void FeturaPlusAxis::setStatusProblem(asynStatus status) {
 int FeturaPlusAxis::getHomedState() {
     int home_done=-1;
     size_t nread;
+    bool reply_check, prefix_check, checksum_check;
 
     // Retrieve homing vs. homed
-    memcpy(pC_->outString_, CHECKHOME_CMD, sizeof(CHECKHOME_CMD));
+    pC_->buildSimpleCommand(pC_->outString_, CHECKHOME_CMD, sizeof(CHECKHOME_CMD));
     pC_->writeReadController(sizeof(CHECKHOME_CMD), &nread);
-    if (nread == sizeof(CHECKHOME_REPLY_PREFIX)+3) {
-        if (!memcmp(pC_->inString_, CHECKHOME_REPLY_PREFIX, sizeof(CHECKHOME_REPLY_PREFIX))) {
-            if ((pC_->inString_[sizeof(CHECKHOME_REPLY_PREFIX)] == 0x00) && 
-                ((pC_->inString_[sizeof(CHECKHOME_REPLY_PREFIX)+1] == 0x00) || (pC_->inString_[sizeof(CHECKHOME_REPLY_PREFIX)+1] == 0x01))) {
-                if (checkChecksumAtEnd(pC_->inString_, nread)) {
-                    home_done = pC_->inString_[sizeof(CHECKHOME_REPLY_PREFIX)+1];
-                } else {
-                    asynPrint(pC_->pasynUserSelf, ASYN_TRACE_ERROR, "Wrong checksum while retrieving fetura+ %s homing status\n", pC_->portName);
-                }
-            } else {
-                asynPrint(pC_->pasynUserSelf, ASYN_TRACE_ERROR, "Wrong answer while retrieving fetura+ %s homing status\n", pC_->portName);
-            }
+    if (!extractHomedState(pC_->inString_, nread, home_done, reply_check, prefix_check, checksum_check)) {
+        if (checksum_check) {
+            asynPrint(pC_->pasynUserSelf, ASYN_TRACE_ERROR, "Wrong checksum while retrieving Fetura+ %s homed state\n", pC_->portName);
+        } else if (prefix_check) {
+            asynPrint(pC_->pasynUserSelf, ASYN_TRACE_ERROR, "Wrong answer while retrieving Fetura+ %s homed state\n", pC_->portName);
         } else {
-            asynPrint(pC_->pasynUserSelf, ASYN_TRACE_ERROR, "Wrong answer while retrieving fetura+ %s homing status\n", pC_->portName);
+            asynPrint(pC_->pasynUserSelf, ASYN_TRACE_ERROR, "Wrong answer while retrieving Fetura+ %s homed state (read %zu bytes)\n", pC_->portName, nread);
         }
-    } else {
-        asynPrint(pC_->pasynUserSelf, ASYN_TRACE_ERROR, "Wrong answer while retrieving fetura+ %s homing status (read %zu bytes)\n", pC_->portName, nread);
     }
 
     return home_done;
@@ -462,27 +795,19 @@ int FeturaPlusAxis::getHomedState() {
 int FeturaPlusAxis::getBusyState() {
     int is_busy=-1;
     size_t nread;
+    bool reply_check, prefix_check, checksum_check;
 
     // Retrieve ready vs. busy state
-    memcpy(pC_->outString_, CHECK_STATUS_CMD, sizeof(CHECK_STATUS_CMD));
+    pC_->buildSimpleCommand(pC_->outString_, CHECK_STATUS_CMD, sizeof(CHECK_STATUS_CMD));
     pC_->writeReadController(sizeof(CHECK_STATUS_CMD), &nread);
-    if (nread == sizeof(STATUS_REPLY_PREFIX)+3) {
-        if (!memcmp(pC_->inString_, STATUS_REPLY_PREFIX, sizeof(STATUS_REPLY_PREFIX))) {
-            if ((pC_->inString_[sizeof(STATUS_REPLY_PREFIX)] == 0x00) && 
-                ((pC_->inString_[sizeof(STATUS_REPLY_PREFIX)+1] == 0x00) || (pC_->inString_[sizeof(STATUS_REPLY_PREFIX)+1] == 0x01))) {
-                if (checkChecksumAtEnd(pC_->inString_, nread)) {
-                    is_busy = pC_->inString_[sizeof(STATUS_REPLY_PREFIX)+1];
-                } else {
-                    asynPrint(pC_->pasynUserSelf, ASYN_TRACE_ERROR, "Wrong checksum while retrieving fetura+ %s status\n", pC_->portName);
-                }
-            } else {
-                asynPrint(pC_->pasynUserSelf, ASYN_TRACE_ERROR, "Unrecognized reply while retrieving fetura+ %s status\n", pC_->portName);
-            }
+    if (!extractBusyState(pC_->inString_, nread, is_busy, reply_check, prefix_check, checksum_check)) {
+        if (checksum_check) {
+            asynPrint(pC_->pasynUserSelf, ASYN_TRACE_ERROR, "Wrong checksum while retrieving Fetura+ %s busy status\n", pC_->portName);
+        } else if (prefix_check) {
+            asynPrint(pC_->pasynUserSelf, ASYN_TRACE_ERROR, "Wrong answer while retrieving Fetura+ %s busy status\n", pC_->portName);
         } else {
-            asynPrint(pC_->pasynUserSelf, ASYN_TRACE_ERROR, "Unrecognized reply while retrieving fetura+ %s status\n", pC_->portName);
+            asynPrint(pC_->pasynUserSelf, ASYN_TRACE_ERROR, "Wrong answer while retrieving Fetura+ %s busy status (read %zu bytes)\n", pC_->portName, nread);
         }
-    } else {
-        asynPrint(pC_->pasynUserSelf, ASYN_TRACE_ERROR, "Wrong answer while retrieving fetura+ %s status (read %zu bytes)\n", pC_->portName, nread);
     }
 
     return is_busy;
@@ -495,58 +820,22 @@ int FeturaPlusAxis::getBusyState() {
 int FeturaPlusAxis::getCurrentPosition() {
     int readback=-1;
     size_t nread;
+    bool reply_check, prefix_check, checksum_check;
 
     /* Retrieve readback  */
-    memcpy(pC_->outString_, READBACK_CMD, sizeof(READBACK_CMD));
+    pC_->buildSimpleCommand(pC_->outString_, READBACK_CMD, sizeof(READBACK_CMD));
     pC_->writeReadController(sizeof(READBACK_CMD), &nread);
-    if (nread == sizeof(READBACK_REPLY_PREFIX)+3) {
-        if (!memcmp(pC_->inString_, READBACK_REPLY_PREFIX, sizeof(READBACK_REPLY_PREFIX))) {
-            if (checkChecksumAtEnd(pC_->inString_, nread)) {
-                readback = pC_->inString_[sizeof(READBACK_REPLY_PREFIX)] << 8;
-                readback += (unsigned char)(pC_->inString_[sizeof(READBACK_REPLY_PREFIX)+1]);
-            } else {
-                asynPrint(pC_->pasynUserSelf, ASYN_TRACE_ERROR, "Wrong checksum while retrieving fetura+ %s readback\n", pC_->portName);
-            }
+    if (!extractReadback(pC_->inString_, nread, readback, reply_check, prefix_check, checksum_check)) {
+        if (checksum_check) {
+            asynPrint(pC_->pasynUserSelf, ASYN_TRACE_ERROR, "Wrong checksum while retrieving Fetura+ %s readback\n", pC_->portName);
+        } else if (prefix_check) {
+            asynPrint(pC_->pasynUserSelf, ASYN_TRACE_ERROR, "Wrong answer while retrieving Fetura+ %s readback\n", pC_->portName);
         } else {
-            asynPrint(pC_->pasynUserSelf, ASYN_TRACE_ERROR, "Unrecognized reply while retrieving fetura+ %s readback\n", pC_->portName);
+            asynPrint(pC_->pasynUserSelf, ASYN_TRACE_ERROR, "Wrong answer while retrieving Fetura+ %s readback (read %zu bytes)\n", pC_->portName, nread);
         }
-    } else {
-        asynPrint(pC_->pasynUserSelf, ASYN_TRACE_ERROR, "Wrong answer while retrieving fetura+ %s readback (read %zu bytes)\n", pC_->portName, nread);
     }
 
     return readback;
-}
-
-/** Calculates the checksum of a command.
-  * To be appended to the command before sending everything to the controller.
-  *
-  * \param[in] frame        Command character-array
-  * \param[in] frame_length Number of characters in frame
-  *
-  * \return 8-bit checksum
-  */
-unsigned char FeturaPlusAxis::calculateChecksum(char *frame, size_t frame_length) {
-    unsigned int sum=0;
-
-    for (size_t i=0; i<frame_length; i++) {
-        sum += (unsigned char)(frame[i]);
-    }
-    sum = sum & 0xFF;
-    return sum;
-}
-
-/** Confirms the checksum of a reply.
-  * Calculates the 8-bit checksum of a character-array reply frame, and checks it against the appended checksum.
-  *
-  * \param[in] frame        Command character-array
-  * \param[in] frame_length Number of characters in frame
-  *
-  * \return 1 if checksum is correct, 0 otherwise
-  */
-bool FeturaPlusAxis::checkChecksumAtEnd(char *frame, size_t frame_length) {
-    unsigned char calculated_checksum = calculateChecksum(frame+1, frame_length-2);
-    unsigned char given_checksum = (unsigned char)(frame[frame_length-1]);
-    return (calculated_checksum==given_checksum);
 }
 
 
