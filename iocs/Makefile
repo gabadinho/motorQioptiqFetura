@@ -1,7 +1,7 @@
 TOP = ..
 include $(TOP)/configure/CONFIG
 
-DIRS += qioptiqFeturaIOC
+DIRS += qioptiqFeturaIOC gtestIOC
 
 include $(TOP)/configure/RULES_TOP
 

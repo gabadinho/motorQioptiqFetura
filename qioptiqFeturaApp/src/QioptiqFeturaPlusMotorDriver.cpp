@@ -34,12 +34,12 @@ static const char *driverName = "FeturaPlusOptics";
   *
   * \param[in] portName          The name of the asyn port that will be created for this driver
   * \param[in] asynPortName      The name of the drvAsynIPPPort that was created previously to connect to the Fetura+ controller 
-  * \param[in] numAxes           The number of axes that this controller supports (discarded and overwritten to 1)
+  * \param[in] numAxes           The number of axes that this controller supports 
   * \param[in] movingPollPeriod  The time between polls when any axis is moving 
   * \param[in] idlePollPeriod    The time between polls when no axis is moving 
   */
 FeturaPlusController::FeturaPlusController(const char *portName, const char *asynPortName, int numAxes, double movingPollPeriod, double idlePollPeriod)
-    :asynMotorController(portName, 1, NUM_FETURA_PARAMS,
+    :asynMotorController(portName, 1, NUM_FETURA_PARAMS, 
                          0,
                          0,
                          ASYN_CANBLOCK,
@@ -208,10 +208,10 @@ bool FeturaPlusController::extractSerialNumber(const char *buffer, size_t nread,
     if (nread == sizeof(SERIALNUMBER_REPLY_PREFIX)+5) {
         if (!memcmp(buffer, SERIALNUMBER_REPLY_PREFIX, sizeof(SERIALNUMBER_REPLY_PREFIX))) {
             if (checkChecksumAtEnd(buffer, nread)) {
-                sernr = (unsigned char)(buffer[sizeof(SERIALNUMBER_REPLY_PREFIX)] << 24) + 
-                        (unsigned char)(buffer[sizeof(SERIALNUMBER_REPLY_PREFIX)+1] << 16) + 
-                        (unsigned char)(buffer[sizeof(SERIALNUMBER_REPLY_PREFIX)+2] << 8) + 
-                        (unsigned char)(buffer[sizeof(SERIALNUMBER_REPLY_PREFIX)+3]);
+                sernr = ((buffer[sizeof(SERIALNUMBER_REPLY_PREFIX)]) << 24) + 
+                        ((buffer[sizeof(SERIALNUMBER_REPLY_PREFIX)+1]) << 16) + 
+                        ((buffer[sizeof(SERIALNUMBER_REPLY_PREFIX)+2]) << 8) + 
+                        (buffer[sizeof(SERIALNUMBER_REPLY_PREFIX)+3]);
                 res = true;
             } else {
                 wrong_checksum = true;
@@ -254,10 +254,10 @@ bool FeturaPlusController::extractFirmware(const char *buffer, size_t nread, uns
     if (nread == sizeof(FIRMWARE_REPLY_PREFIX)+5) {
         if (!memcmp(buffer, FIRMWARE_REPLY_PREFIX, sizeof(FIRMWARE_REPLY_PREFIX))) {
             if (checkChecksumAtEnd(buffer, nread)) {
-                firhi = (unsigned char)(buffer[sizeof(FIRMWARE_REPLY_PREFIX)+2] << 8) + 
-                        (unsigned char)(buffer[sizeof(FIRMWARE_REPLY_PREFIX)+3]);
-                firlo = (unsigned char)(buffer[sizeof(FIRMWARE_REPLY_PREFIX)] << 8) + 
-                        (unsigned char)(buffer[sizeof(FIRMWARE_REPLY_PREFIX)+1]);
+                firhi = ((buffer[sizeof(FIRMWARE_REPLY_PREFIX)+2]) << 8) + 
+                        (buffer[sizeof(FIRMWARE_REPLY_PREFIX)+3]);
+                firlo = ((buffer[sizeof(FIRMWARE_REPLY_PREFIX)]) << 8) + 
+                        (buffer[sizeof(FIRMWARE_REPLY_PREFIX)+1]);
                 res = true;
             } else {
                 wrong_checksum = true;
@@ -384,7 +384,7 @@ void FeturaPlusAxis::report(FILE *fp, int level) {
   */
 asynStatus FeturaPlusAxis::move(double position, int relative, double minVelocity, double maxVelocity, double acceleration) {
     asynStatus status = asynError;
-    size_t nread;
+    size_t nread, nwrite;
     int moveto_pos = position;
     bool timeout, reply_check, prefix_check, checksum_check;
 
@@ -400,8 +400,8 @@ asynStatus FeturaPlusAxis::move(double position, int relative, double minVelocit
             asynPrint(pC_->pasynUserSelf, ASYN_TRACE_FLOW, "Moving Fetura+ %s to %f in FZM\n", pC_->portName, position);
         }
 
-        buildMoveCommand(pC_->outString_, moveto_pos);
-        pC_->writeReadController(sizeof(MOVETO_CMD_PREFIX)+3, &nread);
+        buildMoveCommand(pC_->outString_, moveto_pos, nwrite);
+        pC_->writeReadController(nwrite, &nread);
         if (extractMoveTimeout(pC_->inString_, nread, timeout, reply_check, prefix_check, checksum_check)) {
             if (timeout) {
                 asynPrint(pC_->pasynUserSelf, ASYN_TRACE_ERROR, "Timeout while moving Fetura+ %s\n", pC_->portName);
@@ -517,7 +517,7 @@ asynStatus FeturaPlusAxis::poll(bool *moving) {
 /** All the following methods generate a command string to be sent to the controller.
   *
   */
-bool FeturaPlusAxis::buildMoveCommand(char *buffer, unsigned pos) {
+bool FeturaPlusAxis::buildMoveCommand(char *buffer, unsigned pos, size_t& cmd_len) {
     unsigned char checksum;
 
     if (!buffer) {
@@ -529,6 +529,8 @@ bool FeturaPlusAxis::buildMoveCommand(char *buffer, unsigned pos) {
     buffer[sizeof(MOVETO_CMD_PREFIX)+1] = (pos & 0xFF);
     checksum = FeturaPlusController::calculateChecksum(buffer, sizeof(MOVETO_CMD_PREFIX)+2);
     buffer[sizeof(MOVETO_CMD_PREFIX)+2] = checksum;
+
+    cmd_len = sizeof(MOVETO_CMD_PREFIX)+3;
 
     return true;
 }
@@ -616,7 +618,7 @@ bool FeturaPlusAxis::extractReadback(const char *buffer, size_t nread, int& read
   *
   * \return true if frame prefix is correct and calculated checksum matches the one embedded in the frame
   */
-bool FeturaPlusAxis::extractHomedState(const char *buffer, size_t nread, int& is_homed, bool& wrong_reply, bool& wrong_prefix, bool& wrong_checksum) {
+bool FeturaPlusAxis::extractHomedState(const char *buffer, size_t nread, bool& is_homed, bool& wrong_reply, bool& wrong_prefix, bool& wrong_checksum) {
     bool res = false;
     int hom = -1;
 
@@ -663,7 +665,7 @@ bool FeturaPlusAxis::extractHomedState(const char *buffer, size_t nread, int& is
   *
   * \return true if frame prefix is correct and calculated checksum matches the one embedded in the frame
   */
-bool FeturaPlusAxis::extractBusyState(const char *buffer, size_t nread, int& is_busy, bool& wrong_reply, bool& wrong_prefix, bool& wrong_checksum) {
+bool FeturaPlusAxis::extractBusyState(const char *buffer, size_t nread, bool& is_busy, bool& wrong_reply, bool& wrong_prefix, bool& wrong_checksum) {
     bool res = false;
     int busy = -1;
 
@@ -728,11 +730,11 @@ bool FeturaPlusAxis::extractMoveTimeout(const char *buffer, size_t nread, bool& 
             timeout = 0;
             res = true;
         }
-    } else if (nread == sizeof(READBACK_REPLY_PREFIX)+3) {
-        if ((!memcmp(buffer, READBACK_REPLY_PREFIX, sizeof(READBACK_REPLY_PREFIX))) && (buffer[sizeof(READBACK_REPLY_PREFIX)] == 0x00) &&
-                    ((buffer[sizeof(READBACK_REPLY_PREFIX)+1] == 0x00) || (buffer[sizeof(READBACK_REPLY_PREFIX)+1] == 0x01))) {
+    } else if (nread == sizeof(MOVETO_REPLY_PREFIX)+3) {
+        if ((!memcmp(buffer, MOVETO_REPLY_PREFIX, sizeof(MOVETO_REPLY_PREFIX))) && (buffer[sizeof(MOVETO_REPLY_PREFIX)] == 0x00) &&
+                    ((buffer[sizeof(MOVETO_REPLY_PREFIX)+1] == 0x00) || (buffer[sizeof(MOVETO_REPLY_PREFIX)+1] == 0x01))) {
             if (FeturaPlusController::checkChecksumAtEnd(buffer, nread)) {
-                timeout = buffer[sizeof(READBACK_REPLY_PREFIX)+1];
+                timeout = 1-buffer[sizeof(MOVETO_REPLY_PREFIX)+1];
                 res = true;
             } else {
                 wrong_checksum = true;
@@ -770,12 +772,12 @@ void FeturaPlusAxis::setStatusProblem(asynStatus status) {
 int FeturaPlusAxis::getHomedState() {
     int home_done=-1;
     size_t nread;
-    bool reply_check, prefix_check, checksum_check;
+    bool homed, reply_check, prefix_check, checksum_check;
 
     // Retrieve homing vs. homed
     pC_->buildSimpleCommand(pC_->outString_, CHECKHOME_CMD, sizeof(CHECKHOME_CMD));
     pC_->writeReadController(sizeof(CHECKHOME_CMD), &nread);
-    if (!extractHomedState(pC_->inString_, nread, home_done, reply_check, prefix_check, checksum_check)) {
+    if (!extractHomedState(pC_->inString_, nread, homed, reply_check, prefix_check, checksum_check)) {
         if (checksum_check) {
             asynPrint(pC_->pasynUserSelf, ASYN_TRACE_ERROR, "Wrong checksum while retrieving Fetura+ %s homed state\n", pC_->portName);
         } else if (prefix_check) {
@@ -783,6 +785,8 @@ int FeturaPlusAxis::getHomedState() {
         } else {
             asynPrint(pC_->pasynUserSelf, ASYN_TRACE_ERROR, "Wrong answer while retrieving Fetura+ %s homed state (read %zu bytes)\n", pC_->portName, nread);
         }
+    } else {
+        home_done = homed;
     }
 
     return home_done;
@@ -795,12 +799,12 @@ int FeturaPlusAxis::getHomedState() {
 int FeturaPlusAxis::getBusyState() {
     int is_busy=-1;
     size_t nread;
-    bool reply_check, prefix_check, checksum_check;
+    bool busy, reply_check, prefix_check, checksum_check;
 
     // Retrieve ready vs. busy state
     pC_->buildSimpleCommand(pC_->outString_, CHECK_STATUS_CMD, sizeof(CHECK_STATUS_CMD));
     pC_->writeReadController(sizeof(CHECK_STATUS_CMD), &nread);
-    if (!extractBusyState(pC_->inString_, nread, is_busy, reply_check, prefix_check, checksum_check)) {
+    if (!extractBusyState(pC_->inString_, nread, busy, reply_check, prefix_check, checksum_check)) {
         if (checksum_check) {
             asynPrint(pC_->pasynUserSelf, ASYN_TRACE_ERROR, "Wrong checksum while retrieving Fetura+ %s busy status\n", pC_->portName);
         } else if (prefix_check) {
@@ -808,6 +812,8 @@ int FeturaPlusAxis::getBusyState() {
         } else {
             asynPrint(pC_->pasynUserSelf, ASYN_TRACE_ERROR, "Wrong answer while retrieving Fetura+ %s busy status (read %zu bytes)\n", pC_->portName, nread);
         }
+    } else {
+        is_busy = busy;
     }
 
     return is_busy;

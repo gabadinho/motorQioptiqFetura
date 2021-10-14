@@ -22,7 +22,7 @@ const unsigned char CHECK_STATUS_CMD[]    = { 0x08, 0x00, 0x10, 0xB0, 0x04, 0x00
 const unsigned char STATUS_REPLY_PREFIX[] = { 0x4F, 0x0A, 0x00, 0x11, 0xB4, 0x04, 0x00, 0x10, 0x03, 0xBD };
 
 const unsigned char MOVETO_CMD_PREFIX[]   = { 0x06, 0x00, 0x10, 0x21, 0xC7 };
-const unsigned char MOVETO_REPLY_PREFIX[] = { 0x08, 0x00, 0x11, 0xD4, 0x01, 0x03, 0xEC };
+const unsigned char MOVETO_REPLY_PREFIX[] = { 0x4F, 0x08, 0x00, 0x11, 0xD4, 0x01, 0x03, 0xEC };
 
 const unsigned char READBACK_CMD[]          = { 0x08, 0x00, 0x10, 0xB0, 0x04, 0x00, 0x11, 0x03, 0xC8, 0xA8 };
 const unsigned char READBACK_REPLY_PREFIX[] = { 0x4F, 0x0A, 0x00, 0x11, 0xB4, 0x04, 0x00, 0x10, 0x03, 0xC8 };
@@ -59,13 +59,13 @@ public:
     asynStatus poll(bool *moving);
 
     // Class-wide methods
-    static bool buildMoveCommand(char *buffer, unsigned pos);
+    static bool buildMoveCommand(char *buffer, unsigned pos, size_t& cmd_len);
 
     static bool gotAcknowledged(const char *buffer, size_t nread, bool& wrong_reply);
     static bool extractMoveTimeout(const char *buffer, size_t nread, bool& got_timeout, bool& wrong_reply, bool& wrong_prefix, bool& wrong_checksum);
     static bool extractReadback(const char *buffer, size_t nread, int& readback, bool& wrong_reply, bool& wrong_prefix, bool& wrong_checksum);
-    static bool extractHomedState(const char *buffer, size_t nread, int& is_homed, bool& wrong_reply, bool& wrong_prefix, bool& wrong_checksum);
-    static bool extractBusyState(const char *buffer, size_t nread, int& is_busy, bool& wrong_reply, bool& wrong_prefix, bool& wrong_checksum);
+    static bool extractHomedState(const char *buffer, size_t nread, bool& is_homed, bool& wrong_reply, bool& wrong_prefix, bool& wrong_checksum);
+    static bool extractBusyState(const char *buffer, size_t nread, bool& is_busy, bool& wrong_reply, bool& wrong_prefix, bool& wrong_checksum);
 
 protected:
     // Specific class methods
