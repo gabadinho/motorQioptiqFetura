@@ -37,9 +37,7 @@ RUN wget -P /tmp/ https://epics.anl.gov/bcda/synApps/tar/synApps_6_1.tar.gz && \
 RUN cd /usr/local/epics && git clone https://github.com/gabadinho/motorQioptiqFetura.git && \
     sed -i -f /tmp/epicsbase_release.sed /usr/local/epics/motorQioptiqFetura/configure/RELEASE && \
     cp /usr/local/epics/motorQioptiqFetura/configure/EXAMPLE_RELEASE.local /usr/local/epics/motorQioptiqFetura/configure/RELEASE.local && \
-    sed -i -f /tmp/releaselocal.sed /usr/local/epics/motorQioptiqFetura/configure/RELEASE.local && \
-    cp /usr/local/epics/motorQioptiqFetura/iocs/qioptiqFeturaIOC/configure/EXAMPLE_RELEASE.local /usr/local/epics/motorQioptiqFetura/iocs/qioptiqFeturaIOC/configure/RELEASE.local && \
-    sed -i -f /tmp/iocreleaselocal.sed /usr/local/epics/motorQioptiqFetura/iocs/qioptiqFeturaIOC/configure/RELEASE.local
+    sed -i -f /tmp/releaselocal.sed /usr/local/epics/motorQioptiqFetura/configure/RELEASE.local
 
 # Patch serial device connection
 # RUN sed -i -f /tmp/ttyusb_feturacmd.sed /usr/local/epics/motorQioptiqFetura/iocs/qioptiqFeturaIOC/iocBoot/iocQioptiqFetura/feturaplus.cmd
