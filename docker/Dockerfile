@@ -1,5 +1,5 @@
 # Base image
-FROM amd64/debian:stable
+FROM amd64/debian:oldstable
 
 # Copy sed-patch files into image
 COPY *.sed /tmp/
